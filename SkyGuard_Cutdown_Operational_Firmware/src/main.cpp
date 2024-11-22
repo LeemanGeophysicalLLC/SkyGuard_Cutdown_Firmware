@@ -38,10 +38,10 @@ uint16_t getCutdownPressurehPa()
    * Return the cutdown pressure in hPa from the DIP switch settings.
    * If the pressure feature is disabled we return a pressure of 0.
    */
-  uint8_t set_index = digitalRead(PIN_PRESSURE_BIT0);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT1);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT2);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT3);
+  uint8_t set_index = ! digitalRead(PIN_PRESSURE_BIT0);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT1);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT2);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT3);
 
   uint16_t pressures_hPa[16] = {0, 10, 100, 150, 200, 250, 300,
                                 350, 400, 450, 500, 600, 700,
@@ -55,10 +55,10 @@ uint16_t getCutdownTimeMinutes()
    * Return the cutdown time in minutes from the DIP switch settings.
    * If the time feature is disabled we return a time of 0.
    */
-  uint8_t set_index = digitalRead(PIN_TIME_BIT0);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT1);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT2);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT3);
+  uint8_t set_index = ! digitalRead(PIN_TIME_BIT0);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT1);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT2);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT3);
 
   uint16_t times_minutes[16] = {0, 1, 2, 5, 10, 20, 30, 40,
                                 50, 60, 70, 80, 90, 100, 110,
@@ -112,7 +112,7 @@ uint8_t stateInitialize()
   releaseServo.write(SERVO_CAPTURE_POSITION);
 
   // Configure the pressure sensor
-  if (!pressure_sensor.begin_I2C())
+  if (!pressure_sensor.begin_I2C(0x76))
   {
     Serial.println("ERROR - Pressure Sensor Startup Failed");
     return S_ERROR;
@@ -152,8 +152,6 @@ uint8_t stateInitialize()
       return S_ERROR;
     }
   }
-  Serial.print("Starting Pressure: ");
-  Serial.println(starting_pressure_hPa);
   return S_RUNCYCLE;
 }
 
@@ -176,9 +174,10 @@ uint8_t stateRunCycle()
    * Runs a cycle of checking for cut conditions and operating the device.
    */
 
-  LowPower.idle(SLEEP_1S, ADC_OFF, TIMER2_OFF, TIMER1_ON, TIMER0_OFF, 
-                SPI_OFF, USART0_OFF, TWI_OFF);
-  
+  //LowPower.idle(SLEEP_1S, ADC_OFF, TIMER2_OFF, TIMER1_ON, TIMER0_OFF, 
+  //              SPI_OFF, USART0_OFF, TWI_OFF);
+  delay(1000);//TODO Remove
+
   // Toggle Ready Green LED for heartbeat indication
   digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
 
@@ -188,8 +187,24 @@ uint8_t stateRunCycle()
 
   // Read the current pressure
   uint16_t current_pressure_hPa = getPressurehPa();
-  Serial.print("Current Pressure: ");
-  Serial.println(pressure_criteria_hPa);
+
+  // Show system state
+  static uint8_t header_counter = 0 ;
+  if(header_counter%10==0){
+  Serial.println("StartPress\tCurrentPress\tSetPress\tSetTime\tTimeArmed\tET");
+  }
+  Serial.print(starting_pressure_hPa);
+  Serial.print("\t");
+  Serial.print(current_pressure_hPa);
+  Serial.print("\t");
+  Serial.print(pressure_criteria_hPa);
+  Serial.print("\t");
+  Serial.print(time_criteria_minutes);
+  Serial.print("\t");
+  Serial.print(timer_armed);
+  Serial.print("\t");
+  Serial.println((millis() - timer_armed_ms)/1000);
+  header_counter+=1;
 
   // Check if we need to arm the timer - this is when the time setting is not 0 and
   // the timer is not already enabled and we have met the launch criteria
@@ -256,6 +271,7 @@ uint8_t stateArmTimer()
   Serial.println("Arming timer");
   timer_armed = true;
   timer_armed_ms = millis();
+  digitalWrite(PIN_YELLOW_LED, HIGH);
   return S_RUNCYCLE;
 }
 
