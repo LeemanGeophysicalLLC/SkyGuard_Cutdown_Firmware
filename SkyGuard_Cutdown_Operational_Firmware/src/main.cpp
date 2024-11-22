@@ -1,11 +1,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Servo.h>
-
 #include "Adafruit_BMP3XX.h"
 #include "Adafruit_Sensor.h"
-#include "Adafruit_SleepyDog.h"
-#include "LowPower.h" // Customized to work with watchdog library
 #include "pins.h"
 
 // Firmware Version
@@ -105,10 +102,8 @@ uint8_t stateInitialize()
   pinMode(PIN_TIME_BIT2, INPUT);
   pinMode(PIN_TIME_BIT3, INPUT);
 
-  // Configure the servo and move to captured position with a wiggle for testing
+  // Configure servo
   releaseServo.attach(PIN_SERVO);
-  releaseServo.write(SERVO_RELEASE_POSITION);
-  delay(5000);
   releaseServo.write(SERVO_CAPTURE_POSITION);
 
   // Configure the pressure sensor
@@ -139,9 +134,6 @@ uint8_t stateInitialize()
   digitalWrite(PIN_YELLOW_LED, LOW);
   digitalWrite(PIN_GREEN_LED, LOW);
 
-  // Start a watchdog incase the processor locks up
-  Watchdog.enable(4000);
-
   // Verify that we can get valid pressure readings. If not, error out, if so go on.
   // Also sets the instrument starting pressure for arming of the timer function.
   for (uint8_t i=0; i<5; i++)
@@ -151,6 +143,21 @@ uint8_t stateInitialize()
     {
       return S_ERROR;
     }
+  }
+
+  // If the starting pressure is below 500 hPa we must have reset and we'll assume the
+  // starting pressure was actually 1000 hPa. We also don't test the servo.
+  if (starting_pressure_hPa < 500)
+  {
+    starting_pressure_hPa = 1000;
+  }
+  else
+  {
+    // Starting from the ground, wiggle the servo to make sure it is working
+    releaseServo.attach(PIN_SERVO);
+    releaseServo.write(SERVO_RELEASE_POSITION);
+    delay(5000);
+    releaseServo.write(SERVO_CAPTURE_POSITION);
   }
   return S_RUNCYCLE;
 }
@@ -164,7 +171,6 @@ uint8_t stateError()
   Serial.println("Error - shutting down");
   digitalWrite(PIN_YELLOW_LED, LOW);
   digitalWrite(PIN_GREEN_LED, LOW);
-  while(1){Watchdog.reset();}
   return S_ERROR;
 }
 
@@ -174,12 +180,15 @@ uint8_t stateRunCycle()
    * Runs a cycle of checking for cut conditions and operating the device.
    */
 
-  //LowPower.idle(SLEEP_1S, ADC_OFF, TIMER2_OFF, TIMER1_ON, TIMER0_OFF, 
-  //              SPI_OFF, USART0_OFF, TWI_OFF);
-  delay(1000);//TODO Remove
+  // To verify watchdog works you can uncomment this delay and make sure the system resets itself.
+  //delay(5000);
 
   // Toggle Ready Green LED for heartbeat indication
-  digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
+  //digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
+  digitalWrite(PIN_GREEN_LED, HIGH);
+  delay(50);
+  digitalWrite(PIN_GREEN_LED, LOW);
+  delay(950);
 
   // Read switches for current settings
   uint16_t pressure_criteria_hPa = getCutdownPressurehPa();
@@ -191,19 +200,17 @@ uint8_t stateRunCycle()
   // Show system state
   static uint8_t header_counter = 0 ;
   if(header_counter%10==0){
-  Serial.println("StartPress\tCurrentPress\tSetPress\tSetTime\tTimeArmed\tET");
+  Serial.println("StartPress    CurrentPress  SetPress      SetTime       TimerArmed    ET");
   }
-  Serial.print(starting_pressure_hPa);
-  Serial.print("\t");
-  Serial.print(current_pressure_hPa);
-  Serial.print("\t");
-  Serial.print(pressure_criteria_hPa);
-  Serial.print("\t");
-  Serial.print(time_criteria_minutes);
-  Serial.print("\t");
-  Serial.print(timer_armed);
-  Serial.print("\t");
-  Serial.println((millis() - timer_armed_ms)/1000);
+  char buffer[150];
+  sprintf(buffer, "%-14u%-14u%-14u%-14u%-14d%-14lu", //"%-14u\t%-14u\t%-14u\t%-14u\t%-14d\t%-14lu", 
+          starting_pressure_hPa, 
+          current_pressure_hPa, 
+          pressure_criteria_hPa, 
+          time_criteria_minutes, 
+          timer_armed, 
+          (millis() - timer_armed_ms) / 1000);
+  Serial.println(buffer);
   header_counter+=1;
 
   // Check if we need to arm the timer - this is when the time setting is not 0 and
@@ -290,7 +297,6 @@ uint8_t stateFlightComplete()
     digitalWrite(PIN_YELLOW_LED, !digitalRead(PIN_YELLOW_LED));
     digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
     delay(500);
-    Watchdog.reset();
   }
   return S_FLIGHTCOMPLETE;
 }
@@ -305,9 +311,6 @@ void setup(){}
  */
 void loop()
 {
-  // Pet the dog
-  Watchdog.reset();
-
   // Follow wherever the state machine is supposed to go next
   switch (current_state)
   {
