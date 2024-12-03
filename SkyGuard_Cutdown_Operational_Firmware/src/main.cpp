@@ -1,12 +1,12 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Servo.h>
-
 #include "Adafruit_BMP3XX.h"
 #include "Adafruit_Sensor.h"
-#include "Adafruit_SleepyDog.h"
-#include "LowPower.h" // Customized to work with watchdog library
 #include "pins.h"
+
+// Uncomment to arm the timer instantly and not wait for the pressure to drop at launch
+# define ARM_TIMER_INSTANTLY
 
 // Firmware Version
 const uint8_t FIRMWARE_MAJOR_VERSION = 0;
@@ -25,8 +25,9 @@ uint8_t current_state = S_INITIALIZE;
 bool timer_armed = false;
 uint16_t starting_pressure_hPa = 2000;
 uint16_t pressure_arming_delta_hPa = 20; // Roughly 550 ft above launch
-uint8_t SERVO_RELEASE_POSITION = 0;
+uint8_t SERVO_RELEASE_POSITION = 10;
 uint8_t SERVO_CAPTURE_POSITION = 90;
+uint8_t SERVO_WIGGLE_POSITION = 45;
 uint32_t timer_armed_ms = 0;
 
 /*
@@ -38,10 +39,10 @@ uint16_t getCutdownPressurehPa()
    * Return the cutdown pressure in hPa from the DIP switch settings.
    * If the pressure feature is disabled we return a pressure of 0.
    */
-  uint8_t set_index = digitalRead(PIN_PRESSURE_BIT0);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT1);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT2);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT3);
+  uint8_t set_index = ! digitalRead(PIN_PRESSURE_BIT0);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT1);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT2);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT3);
 
   uint16_t pressures_hPa[16] = {0, 10, 100, 150, 200, 250, 300,
                                 350, 400, 450, 500, 600, 700,
@@ -55,10 +56,10 @@ uint16_t getCutdownTimeMinutes()
    * Return the cutdown time in minutes from the DIP switch settings.
    * If the time feature is disabled we return a time of 0.
    */
-  uint8_t set_index = digitalRead(PIN_TIME_BIT0);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT1);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT2);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT3);
+  uint8_t set_index = ! digitalRead(PIN_TIME_BIT0);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT1);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT2);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT3);
 
   uint16_t times_minutes[16] = {0, 1, 2, 5, 10, 20, 30, 40,
                                 50, 60, 70, 80, 90, 100, 110,
@@ -105,14 +106,12 @@ uint8_t stateInitialize()
   pinMode(PIN_TIME_BIT2, INPUT);
   pinMode(PIN_TIME_BIT3, INPUT);
 
-  // Configure the servo and move to captured position with a wiggle for testing
+  // Configure servo
   releaseServo.attach(PIN_SERVO);
-  releaseServo.write(SERVO_RELEASE_POSITION);
-  delay(5000);
   releaseServo.write(SERVO_CAPTURE_POSITION);
 
   // Configure the pressure sensor
-  if (!pressure_sensor.begin_I2C())
+  if (!pressure_sensor.begin_I2C(0x76))
   {
     Serial.println("ERROR - Pressure Sensor Startup Failed");
     return S_ERROR;
@@ -139,9 +138,6 @@ uint8_t stateInitialize()
   digitalWrite(PIN_YELLOW_LED, LOW);
   digitalWrite(PIN_GREEN_LED, LOW);
 
-  // Start a watchdog incase the processor locks up
-  Watchdog.enable(4000);
-
   // Verify that we can get valid pressure readings. If not, error out, if so go on.
   // Also sets the instrument starting pressure for arming of the timer function.
   for (uint8_t i=0; i<5; i++)
@@ -152,8 +148,25 @@ uint8_t stateInitialize()
       return S_ERROR;
     }
   }
-  Serial.print("Starting Pressure: ");
-  Serial.println(starting_pressure_hPa);
+
+  // If the starting pressure is below 500 hPa we must have reset and we'll assume the
+  // starting pressure was actually 1000 hPa. This makes sure the timer arms again.
+  if (starting_pressure_hPa < 500)
+  {
+    starting_pressure_hPa = 1000;
+  }
+ 
+ // Wiggle the servo to make sure it is working
+  releaseServo.attach(PIN_SERVO);
+  releaseServo.write(SERVO_WIGGLE_POSITION);
+  delay(2000);
+  releaseServo.write(SERVO_CAPTURE_POSITION);
+
+  // If we are arming instantly, do it
+  #ifdef ARM_TIMER_INSTANTLY
+  return S_ARMTIMER;
+  #endif
+
   return S_RUNCYCLE;
 }
 
@@ -166,7 +179,6 @@ uint8_t stateError()
   Serial.println("Error - shutting down");
   digitalWrite(PIN_YELLOW_LED, LOW);
   digitalWrite(PIN_GREEN_LED, LOW);
-  while(1){Watchdog.reset();}
   return S_ERROR;
 }
 
@@ -176,11 +188,15 @@ uint8_t stateRunCycle()
    * Runs a cycle of checking for cut conditions and operating the device.
    */
 
-  LowPower.idle(SLEEP_1S, ADC_OFF, TIMER2_OFF, TIMER1_ON, TIMER0_OFF, 
-                SPI_OFF, USART0_OFF, TWI_OFF);
-  
+  // To verify watchdog works you can uncomment this delay and make sure the system resets itself.
+  //delay(5000);
+
   // Toggle Ready Green LED for heartbeat indication
-  digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
+  //digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
+  digitalWrite(PIN_GREEN_LED, HIGH);
+  delay(50);
+  digitalWrite(PIN_GREEN_LED, LOW);
+  delay(950);
 
   // Read switches for current settings
   uint16_t pressure_criteria_hPa = getCutdownPressurehPa();
@@ -188,8 +204,22 @@ uint8_t stateRunCycle()
 
   // Read the current pressure
   uint16_t current_pressure_hPa = getPressurehPa();
-  Serial.print("Current Pressure: ");
-  Serial.println(pressure_criteria_hPa);
+
+  // Show system state
+  static uint8_t header_counter = 0 ;
+  if(header_counter%10==0){
+  Serial.println("StartPress    CurrentPress  SetPress      SetTime       TimerArmed    ET");
+  }
+  char buffer[150];
+  sprintf(buffer, "%-14u%-14u%-14u%-14u%-14d%-14lu", //"%-14u\t%-14u\t%-14u\t%-14u\t%-14d\t%-14lu", 
+          starting_pressure_hPa, 
+          current_pressure_hPa, 
+          pressure_criteria_hPa, 
+          time_criteria_minutes, 
+          timer_armed, 
+          (millis() - timer_armed_ms) / 1000);
+  Serial.println(buffer);
+  header_counter+=1;
 
   // Check if we need to arm the timer - this is when the time setting is not 0 and
   // the timer is not already enabled and we have met the launch criteria
@@ -221,7 +251,9 @@ uint8_t stateRunCycle()
   // Check if we have reached the time cutdown criteria
   if (timer_armed)
   {
-    if ((millis() - timer_armed_ms) > (time_criteria_minutes * 60 * 1000))
+    uint16_t elapsed_time_seconds = (millis() - timer_armed_ms) / 1000;
+    uint16_t time_criteria_seconds = time_criteria_minutes * 60;
+    if (elapsed_time_seconds >= time_criteria_seconds)
     {
       return S_DOCUTDOWN;
     }
@@ -256,6 +288,7 @@ uint8_t stateArmTimer()
   Serial.println("Arming timer");
   timer_armed = true;
   timer_armed_ms = millis();
+  digitalWrite(PIN_YELLOW_LED, HIGH);
   return S_RUNCYCLE;
 }
 
@@ -274,7 +307,6 @@ uint8_t stateFlightComplete()
     digitalWrite(PIN_YELLOW_LED, !digitalRead(PIN_YELLOW_LED));
     digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
     delay(500);
-    Watchdog.reset();
   }
   return S_FLIGHTCOMPLETE;
 }
@@ -289,9 +321,6 @@ void setup(){}
  */
 void loop()
 {
-  // Pet the dog
-  Watchdog.reset();
-
   // Follow wherever the state machine is supposed to go next
   switch (current_state)
   {

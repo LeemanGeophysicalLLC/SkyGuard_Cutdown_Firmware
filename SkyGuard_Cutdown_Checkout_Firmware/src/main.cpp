@@ -23,10 +23,10 @@ uint16_t getCutdownPressurehPa()
    * Return the cutdown pressure in hPa from the DIP switch settings.
    * If the pressure feature is disabled we return a pressure of 0.
    */
-  uint8_t set_index = digitalRead(PIN_PRESSURE_BIT0);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT1);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT2);
-  set_index = (set_index << 1) | digitalRead(PIN_PRESSURE_BIT3);
+  uint8_t set_index = ! digitalRead(PIN_PRESSURE_BIT0);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT1);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT2);
+  set_index = (set_index << 1) | ! digitalRead(PIN_PRESSURE_BIT3);
 
   uint16_t pressures_hPa[16] = {0, 10, 100, 150, 200, 250, 300,
                                 350, 400, 450, 500, 600, 700,
@@ -40,10 +40,10 @@ uint16_t getCutdownTimeMinutes()
    * Return the cutdown time in minutes from the DIP switch settings.
    * If the time feature is disabled we return a time of 0.
    */
-  uint8_t set_index = digitalRead(PIN_TIME_BIT0);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT1);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT2);
-  set_index = (set_index << 1) | digitalRead(PIN_TIME_BIT3);
+  uint8_t set_index = ! digitalRead(PIN_TIME_BIT0);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT1);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT2);
+  set_index = (set_index << 1) | ! digitalRead(PIN_TIME_BIT3);
 
   uint16_t times_minutes[16] = {0, 1, 2, 5, 10, 20, 30, 40,
                                 50, 60, 70, 80, 90, 100, 110,
@@ -86,11 +86,11 @@ void setup()
   Serial.println("Moving Servo");
   releaseServo.attach(PIN_SERVO);
   releaseServo.write(SERVO_RELEASE_POSITION);
-  delay(5000);
+  delay(1000);
   releaseServo.write(SERVO_CAPTURE_POSITION);
 
   // Configure the pressure sensor
-  if (!pressure_sensor.begin_I2C())
+  if (!pressure_sensor.begin_I2C(0x76))
   {
     Serial.println("ERROR - Pressure Sensor Startup Failed");
     while(1){}
@@ -106,50 +106,34 @@ void setup()
   pinMode(PIN_YELLOW_LED, OUTPUT);
   pinMode(PIN_GREEN_LED, OUTPUT);
 
-  Serial.println("Red LED");
+  Serial.print("Watch for Yellow LED");
+  delay(1000);
   digitalWrite(PIN_YELLOW_LED, HIGH);
   digitalWrite(PIN_GREEN_LED, LOW);
-  delay(1000);
-  digitalWrite(PIN_YELLOW_LED, LOW);
-  delay(500);
-  Serial.println("Green LED");
-  digitalWrite(PIN_GREEN_LED, HIGH);
-  delay(1000);
-  digitalWrite(PIN_GREEN_LED, LOW);
-
-  // Check Pressure Sensor
-  Serial.println("Checking pressure sensor");
-  for (uint8_t i=0; i<5; i++)
-  {
-    Serial.println(getPressurehPa());
-  }
-
-  Serial.println("Checking DIP Switches");
-  delay(2000);
+  delay(3000);
 }
 
 void loop()
 {
+  // Blink LEDs
+  digitalWrite(PIN_YELLOW_LED, ! digitalRead(PIN_YELLOW_LED));
+  digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
   // Check dip switch function
-  Serial.print(digitalRead(PIN_PRESSURE_BIT0));
-  Serial.print("|");
-  Serial.print(digitalRead(PIN_PRESSURE_BIT1));
-  Serial.print("|");
-  Serial.print(digitalRead(PIN_PRESSURE_BIT2));
-  Serial.print("|");
-  Serial.print(digitalRead(PIN_PRESSURE_BIT3));
-  Serial.print("|");
-  Serial.print(digitalRead(PIN_TIME_BIT0));
-  Serial.print("|");
-  Serial.print(digitalRead(PIN_TIME_BIT1));
-  Serial.print("|");
-  Serial.print(digitalRead(PIN_TIME_BIT2));
-  Serial.print("|");
-  Serial.print(digitalRead(PIN_TIME_BIT3));
-  Serial.print("|");
+  Serial.print(! digitalRead(PIN_PRESSURE_BIT3));
+  Serial.print(! digitalRead(PIN_PRESSURE_BIT2));
+  Serial.print(! digitalRead(PIN_PRESSURE_BIT1));
+  Serial.print(! digitalRead(PIN_PRESSURE_BIT0));
+  Serial.print("\t");
+  Serial.print(! digitalRead(PIN_TIME_BIT3));
+  Serial.print(! digitalRead(PIN_TIME_BIT2));
+  Serial.print(! digitalRead(PIN_TIME_BIT1));
+  Serial.print(! digitalRead(PIN_TIME_BIT0));
+  Serial.print("\t");
   Serial.print(getCutdownPressurehPa());
   Serial.print("|");
   Serial.print(getCutdownTimeMinutes());
+  Serial.print("|");
+  Serial.print(getPressurehPa());
   Serial.println();
   delay(100);
 }
