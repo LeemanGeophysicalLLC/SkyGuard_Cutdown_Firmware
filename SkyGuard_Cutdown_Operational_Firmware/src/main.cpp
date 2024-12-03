@@ -5,6 +5,9 @@
 #include "Adafruit_Sensor.h"
 #include "pins.h"
 
+// Uncomment to arm the timer instantly and not wait for the pressure to drop at launch
+# define ARM_TIMER_INSTANTLY
+
 // Firmware Version
 const uint8_t FIRMWARE_MAJOR_VERSION = 0;
 const uint8_t FIRMWARE_MINOR_VERSION = 1;
@@ -22,8 +25,9 @@ uint8_t current_state = S_INITIALIZE;
 bool timer_armed = false;
 uint16_t starting_pressure_hPa = 2000;
 uint16_t pressure_arming_delta_hPa = 20; // Roughly 550 ft above launch
-uint8_t SERVO_RELEASE_POSITION = 0;
+uint8_t SERVO_RELEASE_POSITION = 10;
 uint8_t SERVO_CAPTURE_POSITION = 90;
+uint8_t SERVO_WIGGLE_POSITION = 45;
 uint32_t timer_armed_ms = 0;
 
 /*
@@ -146,19 +150,23 @@ uint8_t stateInitialize()
   }
 
   // If the starting pressure is below 500 hPa we must have reset and we'll assume the
-  // starting pressure was actually 1000 hPa. We also don't test the servo.
+  // starting pressure was actually 1000 hPa. This makes sure the timer arms again.
   if (starting_pressure_hPa < 500)
   {
     starting_pressure_hPa = 1000;
   }
-  else
-  {
-    // Starting from the ground, wiggle the servo to make sure it is working
-    releaseServo.attach(PIN_SERVO);
-    releaseServo.write(SERVO_RELEASE_POSITION);
-    delay(5000);
-    releaseServo.write(SERVO_CAPTURE_POSITION);
-  }
+ 
+ // Wiggle the servo to make sure it is working
+  releaseServo.attach(PIN_SERVO);
+  releaseServo.write(SERVO_WIGGLE_POSITION);
+  delay(2000);
+  releaseServo.write(SERVO_CAPTURE_POSITION);
+
+  // If we are arming instantly, do it
+  #ifdef ARM_TIMER_INSTANTLY
+  return S_ARMTIMER;
+  #endif
+
   return S_RUNCYCLE;
 }
 
@@ -243,7 +251,9 @@ uint8_t stateRunCycle()
   // Check if we have reached the time cutdown criteria
   if (timer_armed)
   {
-    if ((millis() - timer_armed_ms) > (time_criteria_minutes * 60 * 1000))
+    uint16_t elapsed_time_seconds = (millis() - timer_armed_ms) / 1000;
+    uint16_t time_criteria_seconds = time_criteria_minutes * 60;
+    if (elapsed_time_seconds >= time_criteria_seconds)
     {
       return S_DOCUTDOWN;
     }
