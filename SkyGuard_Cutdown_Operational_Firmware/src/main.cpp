@@ -6,11 +6,11 @@
 #include "pins.h"
 
 // Uncomment to arm the timer instantly and not wait for the pressure to drop at launch
-# define ARM_TIMER_INSTANTLY
+// # define ARM_TIMER_INSTANTLY
 
 // Firmware Version
-const uint8_t FIRMWARE_MAJOR_VERSION = 0;
-const uint8_t FIRMWARE_MINOR_VERSION = 1;
+const uint8_t FIRMWARE_MAJOR_VERSION = 1;
+const uint8_t FIRMWARE_MINOR_VERSION = 0;
 
 // Objects
 Adafruit_BMP3XX pressure_sensor;
