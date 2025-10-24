@@ -6,11 +6,11 @@
 #include "pins.h"
 
 // Uncomment to arm the timer instantly and not wait for the pressure to drop at launch
-// # define ARM_TIMER_INSTANTLY
+#define ARM_TIMER_INSTANTLY
 
 // Firmware Version
 const uint8_t FIRMWARE_MAJOR_VERSION = 1;
-const uint8_t FIRMWARE_MINOR_VERSION = 0;
+const uint8_t FIRMWARE_MINOR_VERSION = 1;
 
 // Objects
 Adafruit_BMP3XX pressure_sensor;
@@ -25,11 +25,12 @@ uint8_t current_state = S_INITIALIZE;
 bool timer_armed = false;
 uint16_t starting_pressure_hPa = 2000;
 uint16_t pressure_arming_delta_hPa = 20; // Roughly 550 ft above launch
-uint8_t SERVO_RELEASE_POSITION = 10;
-uint8_t SERVO_CAPTURE_POSITION = 90;
+uint8_t SERVO_RELEASE_POSITION = 105;
+uint8_t SERVO_CAPTURE_POSITION = 5;
 uint8_t SERVO_WIGGLE_POSITION = 45;
 uint32_t timer_armed_ms = 0;
-
+uint8_t SAMPLES_BELOW_BEFORE_CUT = 3; // How many samples below the threshold before we cut
+uint32_t TURN_OFF_SERVO_AFTER_MS = 60000; // Time after cutdown to turn off servo to save wear/tear
 /*
  * HELPERS
  */
@@ -96,6 +97,8 @@ uint8_t stateInitialize()
   // Configure debug serial
   Serial.begin(9600);
 
+  Wire.begin();
+
   // Configure the DIP switch pins
   pinMode(PIN_PRESSURE_BIT0, INPUT);
   pinMode(PIN_PRESSURE_BIT1, INPUT);
@@ -111,9 +114,24 @@ uint8_t stateInitialize()
   releaseServo.write(SERVO_CAPTURE_POSITION);
 
   // Configure the pressure sensor
-  if (!pressure_sensor.begin_I2C(0x76))
+  bool good_bme_start = false;
+  for (int i=0; i<5; i++)
   {
-    Serial.println("ERROR - Pressure Sensor Startup Failed");
+    if (pressure_sensor.begin_I2C(0x76))
+    {
+      good_bme_start = true;
+      break;
+    }
+    else
+    {
+      Serial.println("ERROR - Pressure Sensor Startup Failed");
+      good_bme_start = false;
+      delay(50);
+    }
+  }
+
+  if (!good_bme_start)
+  {
     return S_ERROR;
   }
 
@@ -140,13 +158,26 @@ uint8_t stateInitialize()
 
   // Verify that we can get valid pressure readings. If not, error out, if so go on.
   // Also sets the instrument starting pressure for arming of the timer function.
+  bool good_pressure_reading = false;
+  uint16_t last_good_pressure = 2000;
   for (uint8_t i=0; i<5; i++)
   {
-    starting_pressure_hPa = getPressurehPa();
-    if (starting_pressure_hPa == 2000)
+    uint16_t read_pressure = getPressurehPa();
+    if (read_pressure != 2000)
     {
-      return S_ERROR;
+      last_good_pressure = read_pressure;
+      good_pressure_reading = true;
     }
+    delay(50);
+  }
+
+  if (!good_pressure_reading)
+  {
+    return S_ERROR;
+  }
+  else
+  {
+    starting_pressure_hPa = last_good_pressure;
   }
 
   // If the starting pressure is below 500 hPa we must have reset and we'll assume the
@@ -156,11 +187,12 @@ uint8_t stateInitialize()
     starting_pressure_hPa = 1000;
   }
  
- // Wiggle the servo to make sure it is working
-  releaseServo.attach(PIN_SERVO);
+  // Wiggle the servo to make sure it is working
   releaseServo.write(SERVO_WIGGLE_POSITION);
   delay(2000);
   releaseServo.write(SERVO_CAPTURE_POSITION);
+  delay(1000);
+  releaseServo.detach();
 
   // If we are arming instantly, do it
   #ifdef ARM_TIMER_INSTANTLY
@@ -179,6 +211,7 @@ uint8_t stateError()
   Serial.println("Error - shutting down");
   digitalWrite(PIN_YELLOW_LED, LOW);
   digitalWrite(PIN_GREEN_LED, LOW);
+  delay(100);
   return S_ERROR;
 }
 
@@ -190,6 +223,8 @@ uint8_t stateRunCycle()
 
   // To verify watchdog works you can uncomment this delay and make sure the system resets itself.
   //delay(5000);
+
+  static uint8_t nreadings_below_threshold = 0;
 
   // Toggle Ready Green LED for heartbeat indication
   //digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
@@ -246,13 +281,25 @@ uint8_t stateRunCycle()
   }
 
   // Check if we have reached the pressure cutdown criteria
-  if (current_pressure_hPa <= pressure_criteria_hPa){return S_DOCUTDOWN;}
+  if (current_pressure_hPa <= pressure_criteria_hPa)
+  {
+    nreadings_below_threshold += 1;
+  }
+  else
+  {
+    nreadings_below_threshold = 0;
+  }
+
+  if (nreadings_below_threshold >= SAMPLES_BELOW_BEFORE_CUT)
+  {
+    return S_DOCUTDOWN;
+  }
 
   // Check if we have reached the time cutdown criteria
   if (timer_armed)
   {
-    uint16_t elapsed_time_seconds = (millis() - timer_armed_ms) / 1000;
-    uint16_t time_criteria_seconds = time_criteria_minutes * 60;
+    uint32_t elapsed_time_seconds = (millis() - timer_armed_ms) / 1000;
+    uint32_t time_criteria_seconds = time_criteria_minutes * 60;
     if (elapsed_time_seconds >= time_criteria_seconds)
     {
       return S_DOCUTDOWN;
@@ -273,7 +320,10 @@ uint8_t stateDoCutdown()
   Serial.println("Activating release mechanism");
 
   // Move servo to the release position to drop
+  releaseServo.attach(PIN_SERVO);
+  delay(500);
   releaseServo.write(SERVO_RELEASE_POSITION);
+  delay(500);
 
   return S_FLIGHTCOMPLETE;
 }
@@ -298,12 +348,18 @@ uint8_t stateFlightComplete()
    * We have released the payload and there isn't anything to do but blink the
    * lights in case it helps us find the package and deplete the battery.
    */
-  
+  static uint32_t complete_ms = millis();
+  bool servo_on = true;
   Serial.println("Flight complete - shutting down");
   digitalWrite(PIN_YELLOW_LED, HIGH);
   digitalWrite(PIN_GREEN_LED, LOW);
   while(1)
   {
+    if (((millis() - complete_ms) > TURN_OFF_SERVO_AFTER_MS) && servo_on)
+    {
+      releaseServo.detach();
+      servo_on = false;
+    }
     digitalWrite(PIN_YELLOW_LED, !digitalRead(PIN_YELLOW_LED));
     digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
     delay(500);
