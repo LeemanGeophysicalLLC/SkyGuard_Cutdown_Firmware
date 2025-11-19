@@ -10,7 +10,7 @@
 
 // Firmware Version
 const uint8_t FIRMWARE_MAJOR_VERSION = 1;
-const uint8_t FIRMWARE_MINOR_VERSION = 1;
+const uint8_t FIRMWARE_MINOR_VERSION = 2;
 
 // Objects
 Adafruit_BMP3XX pressure_sensor;
