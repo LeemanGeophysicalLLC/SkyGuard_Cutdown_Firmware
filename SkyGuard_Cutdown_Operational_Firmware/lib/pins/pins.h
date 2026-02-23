@@ -13,4 +13,6 @@ const uint8_t PIN_TIME_BIT3 = A3;
 const uint8_t PIN_TIME_BIT2 = A2;
 const uint8_t PIN_TIME_BIT1 = A1;
 const uint8_t PIN_TIME_BIT0 = A0;
+const uint8_t PIN_JUMPER_A = 10;
+const uint8_t PIN_JUMPER_B = 9;
 #endif

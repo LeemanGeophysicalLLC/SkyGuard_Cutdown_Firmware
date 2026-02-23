@@ -111,6 +111,7 @@ void setup()
   digitalWrite(PIN_YELLOW_LED, HIGH);
   digitalWrite(PIN_GREEN_LED, LOW);
   delay(3000);
+  Serial.println("PRESSURE | TIME | JUMPER_A | JUMPER_B | CUTDOWN_PRESSURE | CUTDOWN_TIME | CURRENT_PRESSURE");
 }
 
 void loop()
@@ -118,21 +119,25 @@ void loop()
   // Blink LEDs
   digitalWrite(PIN_YELLOW_LED, ! digitalRead(PIN_YELLOW_LED));
   digitalWrite(PIN_GREEN_LED, !digitalRead(PIN_GREEN_LED));
-  // Check dip switch function
+  // Check dip switch function and jumper readings
   Serial.print(! digitalRead(PIN_PRESSURE_BIT3));
   Serial.print(! digitalRead(PIN_PRESSURE_BIT2));
   Serial.print(! digitalRead(PIN_PRESSURE_BIT1));
   Serial.print(! digitalRead(PIN_PRESSURE_BIT0));
-  Serial.print("\t");
+  Serial.print(" | ");
   Serial.print(! digitalRead(PIN_TIME_BIT3));
   Serial.print(! digitalRead(PIN_TIME_BIT2));
   Serial.print(! digitalRead(PIN_TIME_BIT1));
   Serial.print(! digitalRead(PIN_TIME_BIT0));
-  Serial.print("\t");
+  Serial.print(" | ");
+  Serial.print(! digitalRead(PIN_JUMPER_A));
+  Serial.print(" | ");
+  Serial.print(! digitalRead(PIN_JUMPER_B));
+  Serial.print(" | ");
   Serial.print(getCutdownPressurehPa());
-  Serial.print("|");
+  Serial.print(" | ");
   Serial.print(getCutdownTimeMinutes());
-  Serial.print("|");
+  Serial.print(" | ");
   Serial.print(getPressurehPa());
   Serial.println();
   delay(100);

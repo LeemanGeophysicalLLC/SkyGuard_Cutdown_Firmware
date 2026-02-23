@@ -5,9 +5,6 @@
 #include "Adafruit_Sensor.h"
 #include "pins.h"
 
-// Uncomment to arm the timer instantly and not wait for the pressure to drop at launch
-#define ARM_TIMER_INSTANTLY
-
 // Firmware Version
 const uint8_t FIRMWARE_MAJOR_VERSION = 1;
 const uint8_t FIRMWARE_MINOR_VERSION = 2;
@@ -23,6 +20,7 @@ enum states {S_INITIALIZE, S_ERROR, S_RUNCYCLE,
 uint8_t current_state = S_INITIALIZE;
 
 bool timer_armed = false;
+bool instant_arm = true;
 uint16_t starting_pressure_hPa = 2000;
 uint16_t pressure_arming_delta_hPa = 20; // Roughly 550 ft above launch
 uint8_t SERVO_RELEASE_POSITION = 105;
@@ -34,6 +32,21 @@ uint32_t TURN_OFF_SERVO_AFTER_MS = 60000; // Time after cutdown to turn off serv
 /*
  * HELPERS
  */
+
+uint32_t getElapsedTimeSeconds()
+{
+  if (!timer_armed) return 0;
+
+  uint32_t elapsed_time_seconds = (millis() - timer_armed_ms) / 1000;
+
+  if (!instant_arm)  // pressure-based arming path
+  {
+    elapsed_time_seconds += 60;
+  }
+  return elapsed_time_seconds;
+}
+
+
 uint16_t getCutdownPressurehPa()
 {
   /*
@@ -194,10 +207,23 @@ uint8_t stateInitialize()
   delay(1000);
   releaseServo.detach();
 
+  // Read the jumper A to determine if we arm instantly or not
+  if (digitalRead(PIN_JUMPER_A) == HIGH)
+  {
+    Serial.println("Arming timer instantly");
+    instant_arm = true;
+  }
+  else
+  {
+    instant_arm = false;
+    Serial.println("Waiting for launch detection");
+  }
+
   // If we are arming instantly, do it
-  #ifdef ARM_TIMER_INSTANTLY
-  return S_ARMTIMER;
-  #endif
+  if (instant_arm)
+  { 
+    return S_ARMTIMER;
+  }
 
   return S_RUNCYCLE;
 }
@@ -252,7 +278,7 @@ uint8_t stateRunCycle()
           pressure_criteria_hPa, 
           time_criteria_minutes, 
           timer_armed, 
-          (millis() - timer_armed_ms) / 1000);
+          getElapsedTimeSeconds());
   Serial.println(buffer);
   header_counter+=1;
 
@@ -298,7 +324,7 @@ uint8_t stateRunCycle()
   // Check if we have reached the time cutdown criteria
   if (timer_armed)
   {
-    uint32_t elapsed_time_seconds = (millis() - timer_armed_ms) / 1000;
+    uint32_t elapsed_time_seconds = getElapsedTimeSeconds();
     uint32_t time_criteria_seconds = time_criteria_minutes * 60;
     if (elapsed_time_seconds >= time_criteria_seconds)
     {
